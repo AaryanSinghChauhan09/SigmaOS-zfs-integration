@@ -1,0 +1,12 @@
+[package]
+name = "sigmaos-zfs-integration"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-or-later"
+description = "SigmaOS component: zfs-integration"
+
+[dependencies]
+
+[[bin]]
+name = "sigmaos-zfs-integration"
+path = "src/main.rs"
