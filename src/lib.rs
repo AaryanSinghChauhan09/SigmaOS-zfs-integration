@@ -149,3 +149,86 @@ pub fn default_state_path() -> Option<PathBuf> {
     directories::ProjectDirs::from("org", "sigmaos", "sigmaos")
         .map(|p| p.data_dir().join("zfs").join("state.json"))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ds(name: &str) -> Dataset {
+        Dataset {
+            name: name.into(),
+            kind: "filesystem".into(),
+            mountpoint: "/mnt/x".into(),
+            compression: "lz4".into(),
+            snapshots_enabled: true,
+            snapshot_retention: 8,
+        }
+    }
+
+    #[test]
+    fn add_remove_and_validation() {
+        let mut st = ZfsState::default();
+        st.add_dataset(ds("tank/home")).unwrap();
+        assert!(st.datasets.contains_key("tank/home"));
+        assert!(matches!(
+            st.add_dataset(ds("noslash")),
+            Err(ZfsError::Validation(_))
+        ));
+        assert!(matches!(
+            st.add_dataset(ds("")),
+            Err(ZfsError::Validation(_))
+        ));
+        st.remove_dataset("tank/home").unwrap();
+        assert!(matches!(
+            st.remove_dataset("tank/home"),
+            Err(ZfsError::NotFound(_))
+        ));
+    }
+
+    #[test]
+    fn snapshot_targets_and_by_pool() {
+        let mut st = ZfsState::default();
+        let mut no_snaps = ds("tank/data");
+        no_snaps.snapshots_enabled = false;
+        st.add_dataset(ds("tank/home")).unwrap();
+        st.add_dataset(no_snaps).unwrap();
+        st.add_dataset(ds("other/vm")).unwrap();
+        assert_eq!(st.snapshot_targets().len(), 2);
+        assert_eq!(st.by_pool("tank/").len(), 2);
+        assert_eq!(st.by_pool("other/").len(), 1);
+    }
+
+    #[test]
+    fn validate_scrub_references() {
+        let mut st = ZfsState::default();
+        st.add_dataset(ds("tank/home")).unwrap();
+        st.scrub = Some(ScrubSchedule {
+            cron: "0 3 * * 0".into(),
+            datasets: vec!["tank/home".into()],
+        });
+        assert!(st.validate().is_ok());
+        st.scrub
+            .as_mut()
+            .unwrap()
+            .datasets
+            .push("tank/ghost".into());
+        assert!(matches!(st.validate(), Err(ZfsError::Validation(_))));
+        // Empty dataset list = all datasets, always valid.
+        st.scrub.as_mut().unwrap().datasets.clear();
+        assert!(st.validate().is_ok());
+    }
+
+    #[test]
+    fn save_load_roundtrip() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("nested/state.json");
+        let mut st = ZfsState::default();
+        st.add_dataset(ds("tank/home")).unwrap();
+        st.last_scrub = Some(1_700_000_000);
+        st.save(&path).unwrap();
+        let loaded = ZfsState::load(&path).unwrap();
+        assert_eq!(loaded.datasets.len(), 1);
+        assert_eq!(loaded.last_scrub, Some(1_700_000_000));
+        assert!(ZfsState::load(&dir.path().join("missing.json")).is_err());
+    }
+}
