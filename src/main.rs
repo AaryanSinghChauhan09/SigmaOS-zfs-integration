@@ -83,7 +83,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 println!("{} (retention {})", d.name, d.snapshot_retention);
             }
         }
-        Commands::Add { name, kind, mountpoint, compression } => {
+        Commands::Add {
+            name,
+            kind,
+            mountpoint,
+            compression,
+        } => {
             st.add_dataset(Dataset {
                 name,
                 kind,
