@@ -231,4 +231,61 @@ mod tests {
         assert_eq!(loaded.last_scrub, Some(1_700_000_000));
         assert!(ZfsState::load(&dir.path().join("missing.json")).is_err());
     }
+
+    // Arrange: dataset with custom retention and compression
+    // Act: serialize and deserialize via save/load
+    // Assert: custom fields preserved
+    #[test]
+    fn test_dataset_retention_and_compression_preserved_aaa() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("zfs.json");
+        let mut st = ZfsState::default();
+        let mut custom = ds("rpool/ROOT/sigma");
+        custom.compression = "zstd".into();
+        custom.snapshot_retention = 24;
+        st.add_dataset(custom).unwrap();
+        st.save(&path).unwrap();
+        let back = ZfsState::load(&path).unwrap();
+        let got = back.datasets.get("rpool/ROOT/sigma").unwrap();
+        assert_eq!(got.compression, "zstd");
+        assert_eq!(got.snapshot_retention, 24);
+    }
+
+    // Arrange: ZfsState with datasets across pools
+    // Act: query by_pool for non-existent pool
+    // Assert: empty result
+    #[test]
+    fn test_by_pool_unknown_returns_empty_aaa() {
+        let mut st = ZfsState::default();
+        st.add_dataset(ds("tank/var")).unwrap();
+        assert!(st.by_pool("nonexistent/").is_empty());
+    }
+
+    // Arrange: ZfsState with multiple datasets under "tank/"
+    // Act: remove all datasets in "tank/"
+    // Assert: remaining datasets only from other pools
+    #[test]
+    fn test_recursive_pool_cleanup_aaa() {
+        let mut st = ZfsState::default();
+        st.add_dataset(ds("tank/root")).unwrap();
+        st.add_dataset(ds("tank/home")).unwrap();
+        st.add_dataset(ds("backup/archive")).unwrap();
+        let to_remove: Vec<String> = st.by_pool("tank/").into_iter().map(|d| d.name.clone()).collect();
+        for name in to_remove {
+            st.remove_dataset(&name).unwrap();
+        }
+        assert_eq!(st.datasets.len(), 1);
+        assert!(st.datasets.contains_key("backup/archive"));
+    }
+
+    // Arrange: invalid JSON file on disk
+    // Act: ZfsState::load
+    // Assert: returns ZfsError::Json
+    #[test]
+    fn test_load_corrupt_json_returns_error_aaa() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("bad.json");
+        std::fs::write(&path, "{not valid json").unwrap();
+        assert!(matches!(ZfsState::load(&path), Err(ZfsError::Json(_))));
+    }
 }
